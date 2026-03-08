@@ -1,0 +1,82 @@
+# ─── Build Stage ─────────────────────────────────────────────────────────────
+FROM node:22-alpine AS builder
+
+# Install build dependencies for native addons (argon2)
+RUN apk add --no-cache python3 make g++ libc6-compat
+
+WORKDIR /app
+
+# Install pnpm
+RUN npm install -g pnpm@9
+
+# Copy workspace config
+COPY package.json pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+
+# Copy package manifests only (for efficient layer caching)
+COPY packages/shared-types/package.json ./packages/shared-types/
+COPY packages/db/package.json ./packages/db/
+COPY packages/security/package.json ./packages/security/
+COPY packages/observability/package.json ./packages/observability/
+COPY packages/mailbox-core/package.json ./packages/mailbox-core/
+COPY packages/provider-yahoo/package.json ./packages/provider-yahoo/
+COPY packages/mcp-server/package.json ./packages/mcp-server/
+COPY apps/api/package.json ./apps/api/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source files
+COPY packages/ ./packages/
+COPY apps/api/ ./apps/api/
+
+# Build all packages + api
+RUN pnpm --filter "@ymail-mcp/shared-types" build
+RUN pnpm --filter "@ymail-mcp/security" build
+RUN pnpm --filter "@ymail-mcp/observability" build
+RUN pnpm --filter "@ymail-mcp/db" build
+RUN pnpm --filter "@ymail-mcp/mailbox-core" build
+RUN pnpm --filter "@ymail-mcp/provider-yahoo" build
+RUN pnpm --filter "@ymail-mcp/mcp-server" build
+RUN pnpm --filter "@ymail-mcp/api" build
+
+# ─── Production Stage ─────────────────────────────────────────────────────────
+FROM node:22-alpine AS runner
+
+# Install libstdc++ for argon2 at runtime
+RUN apk add --no-cache libstdc++
+
+WORKDIR /app
+
+RUN npm install -g pnpm@9
+
+# Copy workspace config and manifests
+COPY package.json pnpm-workspace.yaml ./
+COPY packages/shared-types/package.json ./packages/shared-types/
+COPY packages/db/package.json ./packages/db/
+COPY packages/security/package.json ./packages/security/
+COPY packages/observability/package.json ./packages/observability/
+COPY packages/mailbox-core/package.json ./packages/mailbox-core/
+COPY packages/provider-yahoo/package.json ./packages/provider-yahoo/
+COPY packages/mcp-server/package.json ./packages/mcp-server/
+COPY apps/api/package.json ./apps/api/
+
+# Install only production dependencies
+RUN pnpm install --frozen-lockfile --prod
+
+# Copy built artifacts from builder
+COPY --from=builder /app/packages/shared-types/dist ./packages/shared-types/dist
+COPY --from=builder /app/packages/db/dist ./packages/db/dist
+COPY --from=builder /app/packages/db/src/migrations ./packages/db/src/migrations
+COPY --from=builder /app/packages/security/dist ./packages/security/dist
+COPY --from=builder /app/packages/observability/dist ./packages/observability/dist
+COPY --from=builder /app/packages/mailbox-core/dist ./packages/mailbox-core/dist
+COPY --from=builder /app/packages/provider-yahoo/dist ./packages/provider-yahoo/dist
+COPY --from=builder /app/packages/mcp-server/dist ./packages/mcp-server/dist
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+
+ENV NODE_ENV=production
+ENV PORT=3001
+
+EXPOSE 3001
+
+CMD ["node", "apps/api/dist/index.js"]

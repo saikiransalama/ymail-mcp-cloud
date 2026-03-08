@@ -1,0 +1,62 @@
+# ─── Build Stage ─────────────────────────────────────────────────────────────
+FROM node:22-alpine AS builder
+
+RUN apk add --no-cache python3 make g++ libc6-compat
+
+WORKDIR /app
+
+RUN npm install -g pnpm@9
+
+COPY package.json pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+COPY packages/shared-types/package.json ./packages/shared-types/
+COPY packages/db/package.json ./packages/db/
+COPY packages/security/package.json ./packages/security/
+COPY packages/observability/package.json ./packages/observability/
+COPY packages/mailbox-core/package.json ./packages/mailbox-core/
+COPY packages/provider-yahoo/package.json ./packages/provider-yahoo/
+COPY apps/worker/package.json ./apps/worker/
+
+RUN pnpm install --frozen-lockfile
+
+COPY packages/ ./packages/
+COPY apps/worker/ ./apps/worker/
+
+RUN pnpm --filter "@ymail-mcp/shared-types" build
+RUN pnpm --filter "@ymail-mcp/security" build
+RUN pnpm --filter "@ymail-mcp/observability" build
+RUN pnpm --filter "@ymail-mcp/db" build
+RUN pnpm --filter "@ymail-mcp/mailbox-core" build
+RUN pnpm --filter "@ymail-mcp/provider-yahoo" build
+RUN pnpm --filter "@ymail-mcp/worker" build
+
+# ─── Production Stage ─────────────────────────────────────────────────────────
+FROM node:22-alpine AS runner
+
+RUN apk add --no-cache libstdc++
+
+WORKDIR /app
+
+RUN npm install -g pnpm@9
+
+COPY package.json pnpm-workspace.yaml ./
+COPY packages/shared-types/package.json ./packages/shared-types/
+COPY packages/db/package.json ./packages/db/
+COPY packages/security/package.json ./packages/security/
+COPY packages/observability/package.json ./packages/observability/
+COPY packages/mailbox-core/package.json ./packages/mailbox-core/
+COPY packages/provider-yahoo/package.json ./packages/provider-yahoo/
+COPY apps/worker/package.json ./apps/worker/
+
+RUN pnpm install --frozen-lockfile --prod
+
+COPY --from=builder /app/packages/shared-types/dist ./packages/shared-types/dist
+COPY --from=builder /app/packages/db/dist ./packages/db/dist
+COPY --from=builder /app/packages/security/dist ./packages/security/dist
+COPY --from=builder /app/packages/observability/dist ./packages/observability/dist
+COPY --from=builder /app/packages/mailbox-core/dist ./packages/mailbox-core/dist
+COPY --from=builder /app/packages/provider-yahoo/dist ./packages/provider-yahoo/dist
+COPY --from=builder /app/apps/worker/dist ./apps/worker/dist
+
+ENV NODE_ENV=production
+
+CMD ["node", "apps/worker/dist/index.js"]
