@@ -4,7 +4,7 @@ import { authenticate } from "../../middleware/authenticate.js";
 import { createConnection } from "@ymail-mcp/db";
 import { encryptSecret } from "@ymail-mcp/security";
 import { AppError } from "@ymail-mcp/shared-types";
-import { pingImapConnection } from "@ymail-mcp/provider-yahoo";
+import { pingImapConnection, evictImapConnection } from "@ymail-mcp/provider-yahoo";
 
 const CreateConnectionBody = z.object({
   yahooEmail: z
@@ -67,15 +67,21 @@ export async function createConnectionRoute(app: FastifyInstance): Promise<void>
         );
       }
 
-      const connection = await createConnection(app.db, {
-        userId,
-        provider: "yahoo",
-        authMode: "app_password",
-        encryptedSecretBlob: encrypted.blob,
-        iv: encrypted.iv,
-        authTag: encrypted.authTag,
-        status: "active",
-      });
+      let connection;
+      try {
+        connection = await createConnection(app.db, {
+          userId,
+          provider: "yahoo",
+          authMode: "app_password",
+          encryptedSecretBlob: encrypted.blob,
+          iv: encrypted.iv,
+          authTag: encrypted.authTag,
+          status: "active",
+        });
+      } catch (err) {
+        await evictImapConnection(userId).catch(() => {});
+        throw err;
+      }
 
       req.log.info(
         { userId, connectionId: connection.id },

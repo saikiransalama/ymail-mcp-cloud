@@ -7,10 +7,10 @@ export function signToken(
   secret: string,
   expiresIn: string | number = "24h"
 ): string {
-  if (!secret || secret.length < 32) {
+  if (!secret || secret.length < 64) {
     throw new AppError(
       "INTERNAL_ERROR",
-      "JWT_SECRET must be at least 32 characters"
+      "JWT_SECRET must be at least 64 characters"
     );
   }
   const options: SignOptions = {

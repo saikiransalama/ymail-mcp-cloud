@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import type { Redis } from "ioredis";
 import { AppError } from "@ymail-mcp/shared-types";
 
@@ -27,16 +28,16 @@ export async function checkRateLimit(
   // Redis sorted set sliding window counter
   const pipeline = redis.pipeline();
   pipeline.zremrangebyscore(key, 0, windowStart); // Remove old entries
-  pipeline.zadd(key, now, `${now}-${Math.random()}`); // Add current request
-  pipeline.zcard(key); // Count in window
+  pipeline.zcard(key); // Count BEFORE adding current request
+  pipeline.zadd(key, now, `${now}-${randomUUID()}`); // Add current request
   pipeline.expire(key, windowSeconds + 1); // Keep key alive
 
   const results = await pipeline.exec();
   if (!results) throw new AppError("INTERNAL_ERROR", "Rate limit check failed");
 
-  const count = results[2]?.[1] as number;
+  const count = results[1]?.[1] as number;
 
-  if (count > limit) {
+  if (count >= limit) {
     throw new AppError(
       "RATE_LIMITED",
       `Rate limit exceeded for ${toolName}. Maximum ${limit} requests per minute.`,

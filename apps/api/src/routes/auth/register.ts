@@ -24,7 +24,7 @@ export async function registerRoute(app: FastifyInstance): Promise<void> {
     // Check if user exists
     const existing = await findUserByEmail(app.db, email);
     if (existing) {
-      throw new AppError("VALIDATION_ERROR", "An account with this email already exists");
+      throw new AppError("VALIDATION_ERROR", "Registration failed. Please check your details.");
     }
 
     // Hash password and create user

@@ -1,0 +1,59 @@
+language: "en-US"
+early_access: false
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  path_instructions:
+    - path: "packages/security/**"
+      instructions: |
+        Review with extra scrutiny. This package handles AES-256-GCM encryption,
+        JWT signing/verification, and argon2id password hashing. Check for:
+        - Correct IV uniqueness (must be random per encrypt call)
+        - GCM auth tag validation on decrypt
+        - JWT algorithm pinning (must be HS256 only)
+        - No timing side-channels in token comparison
+
+    - path: "packages/provider-yahoo/src/imap-client.ts"
+      instructions: |
+        This is the IMAP connection pool. Check:
+        - async-mutex is always acquired before any imapflow operation
+        - Pool eviction logic is correct under concurrent load
+        - Auth errors properly evict the connection from the pool
+        - No credentials leaked in error messages or logs
+
+    - path: "packages/mcp-server/src/context.ts"
+      instructions: |
+        Critical security path: Bearer token → UserContext with decrypted credentials.
+        Verify that decrypted credentials are never stored beyond the request lifetime
+        and that CONNECTION_NOT_FOUND is returned (not 500) when no active connection exists.
+
+    - path: "packages/mcp-server/src/middleware/rate-limit.ts"
+      instructions: |
+        Redis sliding-window rate limiter. Verify the pipeline is atomic, the
+        window expiry is correctly set, and the per-tool limits match the spec
+        (send_message: 10/min, archive: 30/min, default: 60/min).
+
+    - path: "apps/api/src/routes/**"
+      instructions: |
+        Check all routes validate input with Zod before touching the DB.
+        Auth routes must not leak whether an email exists (timing/message leaks).
+        Connection routes must enforce userId ownership before any operation.
+
+    - path: "packages/mailbox-core/src/html-sanitizer.ts"
+      instructions: |
+        HTML sanitization for email bodies. Verify the allowlist blocks:
+        script, iframe, object, embed, form, input, img (or src), style,
+        and javascript:/data: URIs in href attributes.
+
+  auto_review:
+    enabled: true
+    drafts: false
+
+chat:
+  auto_reply: true

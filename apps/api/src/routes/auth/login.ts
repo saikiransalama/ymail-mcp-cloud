@@ -29,11 +29,11 @@ export async function loginRoute(app: FastifyInstance): Promise<void> {
       throw new AppError("UNAUTHORIZED", "Invalid email or password");
     }
 
-    // Sign JWT — 24h for web sessions, but MCP clients may keep it longer
+    // Sign JWT — 24h to match register.ts
     const token = signToken(
       { sub: user.id, email: user.email },
       app.config.JWT_SECRET,
-      "7d" // 7 days for MCP client use
+      "24h"
     );
 
     req.log.info({ userId: user.id }, "User logged in");

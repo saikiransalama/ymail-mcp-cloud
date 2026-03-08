@@ -21,17 +21,13 @@ export function registerReadMessage(
         .string()
         .default("INBOX")
         .describe("Mailbox folder containing the message (default: INBOX)"),
-      sanitizeHtml: z
-        .boolean()
-        .default(true)
-        .describe("Whether to sanitize HTML body for safety (default: true, recommended)"),
     },
-    async ({ messageId, folder, sanitizeHtml }) => {
+    async ({ messageId, folder }) => {
       try {
         const ctx = await getContext();
         const provider = getProvider();
         const output = await provider.readMessage(
-          { messageId, folder, sanitizeHtml },
+          { messageId, folder, sanitizeHtml: true },
           ctx
         );
         return {

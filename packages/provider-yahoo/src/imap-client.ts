@@ -20,10 +20,19 @@ interface PoolEntry {
   mutex: Mutex;
   lastUsed: number;
   userId: string;
+  poisoned?: boolean;
 }
 
 const pool = new Map<string, PoolEntry>();
 let cleanupInterval: ReturnType<typeof setInterval> | null = null;
+
+// Per-user creation locks to prevent TOCTOU race conditions
+const creationLocks = new Map<string, Mutex>();
+
+function getCreationLock(userId: string): Mutex {
+  if (!creationLocks.has(userId)) creationLocks.set(userId, new Mutex());
+  return creationLocks.get(userId)!;
+}
 
 /**
  * Get or create an ImapFlow connection for the given user.
@@ -36,72 +45,74 @@ export async function getImapEntry(
   userId: string,
   credentials: ProviderCredentials
 ): Promise<PoolEntry> {
-  const existing = pool.get(userId);
+  return getCreationLock(userId).runExclusive(async () => {
+    const existing = pool.get(userId);
 
-  if (existing) {
-    // Verify connection is still alive
-    if (existing.client.authenticated) {
-      existing.lastUsed = Date.now();
-      return existing;
-    }
-    // Dead connection — remove and reconnect
-    logger.debug({ userId }, "IMAP connection stale, reconnecting");
-    pool.delete(userId);
-    try {
-      await existing.client.logout();
-    } catch {
-      // Ignore logout errors on dead connections
-    }
-  }
-
-  if (pool.size >= POOL_MAX) {
-    // Evict the oldest entry
-    const oldest = [...pool.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-    if (oldest) {
-      logger.warn({ evictedUserId: oldest[0] }, "IMAP pool at capacity, evicting oldest entry");
-      try {
-        await oldest[1].client.logout();
-      } catch {
-        // Ignore
+    if (existing) {
+      // Verify connection is still alive
+      if (existing.client.authenticated) {
+        existing.lastUsed = Date.now();
+        return existing;
       }
-      pool.delete(oldest[0]);
+      // Dead connection — remove and reconnect
+      logger.debug({ userId }, "IMAP connection stale, reconnecting");
+      pool.delete(userId);
+      try {
+        await existing.client.logout();
+      } catch {
+        // Ignore logout errors on dead connections
+      }
     }
-  }
 
-  logger.debug({ userId }, "Creating new IMAP connection");
-  const client = new ImapFlow({
-    host: IMAP_HOST,
-    port: IMAP_PORT,
-    secure: IMAP_SECURE,
-    auth: {
-      user: credentials.email,
-      pass: credentials.appPassword,
-    },
-    logger: false, // Use our own logger
-    greetingTimeout: IMAP_GREETING_TIMEOUT_MS,
-    socketTimeout: IMAP_TIMEOUT_MS,
-    tls: {
-      rejectUnauthorized: true,
-    },
+    if (pool.size >= POOL_MAX) {
+      // Evict the oldest entry
+      const oldest = [...pool.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
+      if (oldest) {
+        logger.warn({ evictedUserId: oldest[0] }, "IMAP pool at capacity, evicting oldest entry");
+        try {
+          await oldest[1].client.logout();
+        } catch {
+          // Ignore
+        }
+        pool.delete(oldest[0]);
+      }
+    }
+
+    logger.debug({ userId }, "Creating new IMAP connection");
+    const client = new ImapFlow({
+      host: IMAP_HOST,
+      port: IMAP_PORT,
+      secure: IMAP_SECURE,
+      auth: {
+        user: credentials.email,
+        pass: credentials.appPassword,
+      },
+      logger: false, // Use our own logger
+      greetingTimeout: IMAP_GREETING_TIMEOUT_MS,
+      socketTimeout: IMAP_TIMEOUT_MS,
+      tls: {
+        rejectUnauthorized: true,
+      },
+    });
+
+    try {
+      await client.connect();
+    } catch (err) {
+      throw mapImapError(err);
+    }
+
+    const entry: PoolEntry = {
+      client,
+      mutex: new Mutex(),
+      lastUsed: Date.now(),
+      userId,
+    };
+
+    pool.set(userId, entry);
+    ensureCleanupRunning();
+
+    return entry;
   });
-
-  try {
-    await client.connect();
-  } catch (err) {
-    throw mapImapError(err);
-  }
-
-  const entry: PoolEntry = {
-    client,
-    mutex: new Mutex(),
-    lastUsed: Date.now(),
-    userId,
-  };
-
-  pool.set(userId, entry);
-  ensureCleanupRunning();
-
-  return entry;
 }
 
 /**
@@ -115,13 +126,18 @@ export async function withImap<T>(
 ): Promise<T> {
   const entry = await getImapEntry(userId, credentials);
   return entry.mutex.runExclusive(async () => {
+    // If another waiter was in flight when this entry was poisoned, bail out immediately
+    if (entry.poisoned) {
+      throw mapImapError(new Error("IMAP connection poisoned due to auth failure"));
+    }
     entry.lastUsed = Date.now();
     try {
       return await fn(entry.client);
     } catch (err) {
-      // On auth errors, remove the connection from pool
+      // On auth errors, poison and remove the connection from pool
       const mapped = mapImapError(err);
       if (mapped.code === "YAHOO_AUTH_FAILED") {
+        entry.poisoned = true;
         pool.delete(userId);
         try { await entry.client.logout(); } catch { /* ignore */ }
       }
@@ -163,6 +179,22 @@ export async function pingImapConnection(
     pool.delete(userId);
     return false;
   }
+}
+
+/**
+ * Shut down the IMAP pool gracefully.
+ * Clears the cleanup interval and closes all connections.
+ */
+export async function shutdownImapPool(): Promise<void> {
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+    cleanupInterval = null;
+  }
+  const closePromises = [...pool.values()].map(async (entry) => {
+    try { await entry.client.logout(); } catch { /* ignore */ }
+  });
+  await Promise.all(closePromises);
+  pool.clear();
 }
 
 function ensureCleanupRunning(): void {
