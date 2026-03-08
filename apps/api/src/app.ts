@@ -16,6 +16,7 @@ import { listConnectionsRoute } from "./routes/connections/list.js";
 import { deleteConnectionRoute } from "./routes/connections/delete.js";
 import { testConnectionRoute } from "./routes/connections/test.js";
 import { mcpRoutes } from "./routes/mcp/index.js";
+import { shutdownImapPool } from "@ymail-mcp/provider-yahoo";
 
 export async function buildApp(config: Config) {
   const app = Fastify({
@@ -110,6 +111,7 @@ export async function buildApp(config: Config) {
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     app.log.info({ signal }, "Shutdown signal received");
+    await shutdownImapPool();
     await app.close();
     process.exit(0);
   };

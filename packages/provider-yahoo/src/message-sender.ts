@@ -1,6 +1,12 @@
 import type { Transporter } from "nodemailer";
-import type { SendMessageInput, SendMessageOutput } from "@ymail-mcp/shared-types";
+import type { SendMessageInput, SendMessageOutput, EmailAddress } from "@ymail-mcp/shared-types";
 import { mapSmtpError } from "./error-mapper.js";
+
+function formatAddress(a: EmailAddress): string {
+  if (!a.name) return a.email;
+  const escaped = a.name.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `"${escaped}" <${a.email}>`;
+}
 
 /**
  * Send a message via Yahoo SMTP using nodemailer.
@@ -10,15 +16,9 @@ export async function sendViaSMTP(
   input: SendMessageInput,
   fromEmail: string
 ): Promise<SendMessageOutput> {
-  const toAddresses = input.to.map((a) =>
-    a.name ? `"${a.name}" <${a.email}>` : a.email
-  );
-  const ccAddresses = (input.cc ?? []).map((a) =>
-    a.name ? `"${a.name}" <${a.email}>` : a.email
-  );
-  const bccAddresses = (input.bcc ?? []).map((a) =>
-    a.name ? `"${a.name}" <${a.email}>` : a.email
-  );
+  const toAddresses = input.to.map(formatAddress);
+  const ccAddresses = (input.cc ?? []).map(formatAddress);
+  const bccAddresses = (input.bcc ?? []).map(formatAddress);
 
   const mailOptions: Parameters<Transporter["sendMail"]>[0] = {
     from: fromEmail,

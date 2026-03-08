@@ -46,14 +46,52 @@ export function sanitizeEmailHtml(html: string): string {
     ],
     allowedAttributes: {
       a: ["href", "title", "target"],
-      td: ["colspan", "rowspan"],
-      th: ["colspan", "rowspan"],
-      "*": ["style"],
+      td: ["colspan", "rowspan", "style"],
+      th: ["colspan", "rowspan", "style"],
+      table: ["style"],
+      div: ["style"],
+      span: ["style"],
+      p: ["style"],
     },
     allowedStyles: {
-      "*": {
-        // Allow only safe inline styles
-        color: [/^#(0x)?[0-9a-f]+$/i, /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/],
+      div: {
+        // Allow only safe inline styles; block url() to prevent CSS tracking pixels
+        color: [/^#[0-9a-f]{3}([0-9a-f]{3})?$/i, /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/],
+        "text-align": [/^left$/, /^right$/, /^center$/, /^justify$/],
+        "font-weight": [/^\d+$/, /^bold$/, /^normal$/],
+        "font-style": [/^italic$/, /^normal$/],
+        "text-decoration": [/^underline$/, /^line-through$/, /^none$/],
+      },
+      span: {
+        color: [/^#[0-9a-f]{3}([0-9a-f]{3})?$/i, /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/],
+        "text-align": [/^left$/, /^right$/, /^center$/, /^justify$/],
+        "font-weight": [/^\d+$/, /^bold$/, /^normal$/],
+        "font-style": [/^italic$/, /^normal$/],
+        "text-decoration": [/^underline$/, /^line-through$/, /^none$/],
+      },
+      p: {
+        color: [/^#[0-9a-f]{3}([0-9a-f]{3})?$/i, /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/],
+        "text-align": [/^left$/, /^right$/, /^center$/, /^justify$/],
+        "font-weight": [/^\d+$/, /^bold$/, /^normal$/],
+        "font-style": [/^italic$/, /^normal$/],
+        "text-decoration": [/^underline$/, /^line-through$/, /^none$/],
+      },
+      td: {
+        color: [/^#[0-9a-f]{3}([0-9a-f]{3})?$/i, /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/],
+        "text-align": [/^left$/, /^right$/, /^center$/, /^justify$/],
+        "font-weight": [/^\d+$/, /^bold$/, /^normal$/],
+        "font-style": [/^italic$/, /^normal$/],
+        "text-decoration": [/^underline$/, /^line-through$/, /^none$/],
+      },
+      th: {
+        color: [/^#[0-9a-f]{3}([0-9a-f]{3})?$/i, /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/],
+        "text-align": [/^left$/, /^right$/, /^center$/, /^justify$/],
+        "font-weight": [/^\d+$/, /^bold$/, /^normal$/],
+        "font-style": [/^italic$/, /^normal$/],
+        "text-decoration": [/^underline$/, /^line-through$/, /^none$/],
+      },
+      table: {
+        color: [/^#[0-9a-f]{3}([0-9a-f]{3})?$/i, /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/],
         "text-align": [/^left$/, /^right$/, /^center$/, /^justify$/],
         "font-weight": [/^\d+$/, /^bold$/, /^normal$/],
         "font-style": [/^italic$/, /^normal$/],
@@ -68,11 +106,5 @@ export function sanitizeEmailHtml(html: string): string {
     disallowedTagsMode: "discard",
     // Strip comments
     allowedIframeHostnames: [],
-    // Reject all iframe/script/style
-    exclusiveFilter(frame) {
-      return ["script", "style", "iframe", "object", "embed", "form"].includes(
-        frame.tag
-      );
-    },
   });
 }

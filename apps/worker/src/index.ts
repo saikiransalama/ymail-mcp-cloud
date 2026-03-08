@@ -4,6 +4,7 @@ import { createDbClient } from "@ymail-mcp/db";
 import { createLogger } from "@ymail-mcp/observability";
 import { createConnectionHealthWorker } from "./workers/connection-health.js";
 import { startScheduler } from "./scheduler.js";
+import { shutdownImapPool } from "@ymail-mcp/provider-yahoo";
 
 const configSchema = z.object({
   DATABASE_URL: z.string().url(),
@@ -43,6 +44,7 @@ async function main() {
   const shutdown = async () => {
     logger.info("Shutting down worker...");
     await healthWorker.close();
+    await shutdownImapPool();
     process.exit(0);
   };
 

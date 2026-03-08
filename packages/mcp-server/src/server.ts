@@ -7,8 +7,6 @@ import { YahooAppPasswordProvider } from "@ymail-mcp/provider-yahoo";
 import type { Redis } from "ioredis";
 import { registerAllTools } from "./tool-registry.js";
 import { resolveUserContext } from "./context.js";
-import { withAuditLog } from "./middleware/audit.js";
-import { checkRateLimit } from "./middleware/rate-limit.js";
 import { AsyncLocalStorage } from "async_hooks";
 import type { UserContext } from "@ymail-mcp/mailbox-core";
 import { AppError } from "@ymail-mcp/shared-types";
@@ -74,14 +72,12 @@ export async function handleMcpRequest(
     return stored.userCtx;
   };
 
-  // Wrap each tool call with audit log + rate limiting
-  // We do this by wrapping getContext to perform side effects
-  const getContextWithMiddleware = async (): Promise<UserContext> => {
-    const ctx = await getContext();
-    return ctx;
-  };
-
-  registerAllTools(server, getProvider, getContextWithMiddleware);
+  registerAllTools(server, getProvider, getContext, {
+    db,
+    redis,
+    logger: childLogger,
+    requestId,
+  });
 
   // 4. Create transport and connect
   const transport = new StreamableHTTPServerTransport({

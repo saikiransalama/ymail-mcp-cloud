@@ -34,11 +34,7 @@ export function normalizeErrorForMcp(err: unknown): McpErrorResponse {
 }
 
 const CREDENTIAL_PATTERNS = [
-  /password/i,
-  /secret/i,
-  /token/i,
-  /key/i,
-  /auth/i,
+  /\b(password|appPassword|secret|masterKey|encryptedSecretBlob|authTag|jwt)\b/i,
 ];
 
 function sanitizeErrorMessage(message: string): string {
