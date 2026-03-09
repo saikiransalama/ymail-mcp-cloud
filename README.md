@@ -1,119 +1,170 @@
-# YMail MCP Cloud
+# YMail MCP — Use Claude to Read and Send Your Yahoo Mail
 
-A production-style, multi-user remote MCP server for Yahoo Mail. Connect any MCP-compatible client (Claude Desktop, MCP Inspector) to your Yahoo inbox using secure app-password authentication.
+This server connects Claude AI to your Yahoo Mail account. Once it's running, you can ask Claude things like *"show me my unread emails"*, *"find the invoice from last week"*, or *"send a quick reply to John"* — and Claude will do it directly through your Yahoo inbox.
 
-## Features
+Your Yahoo password is never stored in plain text. The server encrypts it with military-grade encryption before saving anything to disk.
 
-- **8 MCP tools**: `list_folders`, `list_messages`, `search_messages`, `read_message`, `send_message`, `mark_read`, `mark_unread`, `archive_message`
-- **Multi-user**: JWT-based auth; each user connects their own Yahoo account
-- **Secure credential storage**: AES-256-GCM envelope encryption — Yahoo app passwords never stored in plaintext
-- **HTML sanitization**: XSS-safe email body rendering via strict allowlist
-- **Rate limiting**: Per-user sliding window (60 req/min general, 10/min for send)
-- **Audit logs**: Every MCP tool call recorded with duration and status
-- **Background health checks**: BullMQ worker pings all IMAP connections every 15 min
-- **TypeScript monorepo**: pnpm workspaces + Turbo build pipeline
+---
 
-## Architecture
+## Before You Start
 
-```
-apps/
-  api/        Fastify: REST auth/connections + /mcp endpoint
-  worker/     BullMQ: connection health checks every 15 min
-  web/        Vite+React: Register, Login, Dashboard, Connect Yahoo
-packages/
-  shared-types/    Zod schemas + TypeScript types
-  db/              Drizzle ORM schema, migrations, query helpers
-  security/        AES-256-GCM encryption, JWT, argon2id, redaction
-  observability/   pino logger with field redaction, OTEL tracer stub
-  mailbox-core/    MailProvider interface, HTML sanitizer, body truncator
-  provider-yahoo/  IMAP (imapflow) + SMTP (nodemailer) implementation
-  mcp-server/      MCP SDK server, 8 tools, audit middleware, rate limits
-```
+You need four things installed on your computer. Click each link to download:
 
-## Prerequisites
+| What | Why you need it | How to check if you have it |
+|---|---|---|
+| [Node.js 22+](https://nodejs.org) | Runs the server | `node --version` in Terminal |
+| [pnpm](https://pnpm.io/installation) | Installs code dependencies | `pnpm --version` in Terminal |
+| [Docker Desktop](https://www.docker.com/products/docker-desktop/) | Runs the database in the background | Open Docker Desktop — it should show a green light |
+| [Claude Desktop](https://claude.ai/download) | The Claude app on your computer | You're probably using this already |
 
-- Node.js ≥ 22
-- pnpm ≥ 9
-- Docker + Docker Compose
+You also need a **Yahoo App Password** — this is a special one-time password just for this server (not your regular Yahoo password). Get one here:
 
-## 15-Minute Quickstart
+1. Go to [Yahoo Account Security](https://login.yahoo.com/account/security)
+2. Scroll to **"Generate app password"**
+3. Select **"Other app"**, type any name (e.g. "Claude"), click **Generate**
+4. Copy the 16-character password shown — you'll need it in Step 6 below
 
-**1. Clone and configure**
+---
+
+## Setup (Do This Once)
+
+### Step 1 — Download the project
 
 ```bash
-git clone <repo-url> ymail-mcp-cloud
+git clone https://github.com/saikiransalama/ymail-mcp-cloud.git
 cd ymail-mcp-cloud
+```
+
+> **No git?** Download the zip from GitHub (green "Code" button → "Download ZIP"), unzip it, and open Terminal in that folder.
+
+### Step 2 — Create your config file
+
+```bash
 cp .env.example .env
 ```
 
-Edit `.env` — the two values you must set:
+This creates a `.env` file where your settings will live. Now open it in any text editor.
 
-```env
-# Generate a 64-char hex key: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-MASTER_KEY=<64-char-hex>
+### Step 3 — Generate your secret keys
 
-# Generate a 32+ char secret: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-JWT_SECRET=<32+-char-secret>
+You need two secret keys. Run each command in Terminal and copy the output into your `.env` file:
+
+**First key (MASTER_KEY)** — encrypts your Yahoo password in the database:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-**2. Start PostgreSQL and Redis**
+**Second key (JWT_SECRET)** — keeps your login session secure:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+In your `.env` file, replace the placeholder values:
+```
+MASTER_KEY=paste-the-first-output-here
+JWT_SECRET=paste-the-second-output-here
+```
+
+> Keep this `.env` file private. Never share it or commit it to git.
+
+### Step 4 — Start the database
 
 ```bash
 docker compose up -d postgres redis
 ```
 
-**3. Install dependencies and run migrations**
+This starts two background services (a database and a cache). Docker Desktop must be open and running. You'll see something like `Container ymail-postgres Started`.
+
+### Step 5 — Install dependencies
 
 ```bash
 pnpm install
+```
+
+This downloads all the code libraries the server needs. It only takes a minute.
+
+### Step 6 — Set up the database tables
+
+```bash
 pnpm migrate
 ```
 
-**4. Start all services**
+This creates the tables where your account and encrypted credentials will be stored.
+
+### Step 7 — Start the server
 
 ```bash
 pnpm dev
 ```
 
-This starts:
-- API server at `http://localhost:3001`
-- Web UI at `http://localhost:3000`
-- Worker process (BullMQ connection health)
-
-**5. Register and connect Yahoo**
-
-Open `http://localhost:3000` in your browser:
-
-1. Click **Register** → create an account
-2. Click **Connect Yahoo** → enter your Yahoo email + [app password](https://help.yahoo.com/kb/generate-third-party-passwords-sln15241.html)
-3. Copy the JWT token from the Dashboard
-
-> **Yahoo App Password**: Go to Yahoo Account Security → Generate app password → Select "Other app" → Copy the 16-character password.
-
-**6. Connect MCP Inspector**
-
-Open [MCP Inspector](https://github.com/modelcontextprotocol/inspector) and connect to:
-
+You should see something like:
 ```
-URL:   http://localhost:3001/mcp
-Auth:  Bearer <your-jwt-token>
+Server listening at http://localhost:3001
+MCP endpoint: http://localhost:3001/mcp
 ```
 
-**7. Try the tools**
+**Leave this terminal window open.** The server needs to keep running while you use Claude.
 
+---
+
+## Connect Your Yahoo Account (Do This Once)
+
+Open a **new** Terminal window (keep the server running in the other one).
+
+### Step 8 — Create a login account
+
+```bash
+curl -s -X POST http://localhost:3001/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"any@email.com","password":"choose-a-password"}' | python3 -m json.tool
 ```
-list_folders          → see your Yahoo mailboxes
-list_messages         folder=INBOX limit=10
-search_messages       query="invoice"
-read_message          message_id=<id>
-send_message          to=[{email:"you@example.com"}] subject="Test" textBody="Hello"
-mark_read             message_id=<id>
-archive_message       message_id=<id>
+
+Replace `any@email.com` with any email you want to use as your username (it doesn't have to be your Yahoo email), and set a password you'll remember.
+
+You'll get back a response with a `token` field — a long string of letters and numbers. **Copy this token.** You'll need it in the next steps.
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ...",
+  "user": { "id": "...", "email": "any@email.com" }
+}
 ```
 
-## Claude Desktop Configuration
+### Step 9 — Connect your Yahoo account
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+```bash
+curl -s -X POST http://localhost:3001/connections/yahoo \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE" \
+  -d '{
+    "yahooEmail": "you@yahoo.com",
+    "appPassword": "xxxx-xxxx-xxxx-xxxx"
+  }' | python3 -m json.tool
+```
+
+Replace:
+- `YOUR_TOKEN_HERE` → the token from Step 8
+- `you@yahoo.com` → your actual Yahoo email address
+- `xxxx-xxxx-xxxx-xxxx` → the 16-character App Password from Yahoo (Step 2 in Prerequisites)
+
+If it works, you'll see `"status": "active"`. Your Yahoo password is now stored encrypted — the server immediately verifies it can connect to Yahoo, then saves only the encrypted version.
+
+---
+
+## Connect Claude Desktop
+
+### Step 10 — Open Claude Desktop's config file
+
+On a Mac, open Terminal and run:
+```bash
+open "/Users/$USER/Library/Application Support/Claude/"
+```
+
+You'll see a folder open in Finder. Look for a file called `claude_desktop_config.json`. If it doesn't exist, create it.
+
+### Step 11 — Add the server config
+
+Open `claude_desktop_config.json` in a text editor and add this (replace `YOUR_TOKEN_HERE` with the token from Step 8):
 
 ```json
 {
@@ -121,95 +172,122 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
     "ymail": {
       "url": "http://localhost:3001/mcp",
       "headers": {
-        "Authorization": "Bearer <your-jwt-token>"
+        "Authorization": "Bearer YOUR_TOKEN_HERE"
       }
     }
   }
 }
 ```
 
-## API Endpoints
+If the file already has other servers in it, just add the `"ymail": { ... }` block inside the existing `"mcpServers": { }` section.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/auth/register` | Create account → returns JWT |
-| `POST` | `/auth/login` | Login → returns JWT |
-| `GET` | `/me` | Current user info (auth required) |
-| `POST` | `/connections/yahoo` | Store Yahoo credentials (auth required) |
-| `GET` | `/connections` | List your connections (auth required) |
-| `DELETE` | `/connections/yahoo/:id` | Remove connection (auth required) |
-| `POST` | `/connections/yahoo/test` | Ping IMAP + SMTP (auth required) |
-| `GET\|POST` | `/mcp` | MCP Streamable HTTP transport (auth required) |
-| `GET` | `/health` | Health check (DB + Redis status) |
+### Step 12 — Restart Claude Desktop
 
-## Environment Variables
+Quit Claude Desktop completely:
+- Mac: **Claude menu → Quit Claude** (or `Cmd+Q`)
+- Then reopen it
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | Yes | PostgreSQL connection URL |
-| `REDIS_URL` | Yes | Redis connection URL |
-| `JWT_SECRET` | Yes | HS256 signing key (≥32 chars) |
-| `MASTER_KEY` | Yes | AES-256 master key (64-char hex = 32 bytes) |
-| `PORT` | No | API port (default: 3001) |
-| `NODE_ENV` | No | `development` \| `production` \| `test` |
-| `LOG_LEVEL` | No | `trace`\|`debug`\|`info`\|`warn`\|`error` (default: info) |
+### Step 13 — Verify it's working
 
-## Security Design
+In Claude Desktop, look for a **hammer icon (🔨)** near the message input box. Click it — you should see a list of Yahoo Mail tools:
 
-- **Credential encryption**: Yahoo app passwords are encrypted with AES-256-GCM before storage. A random 12-byte IV is generated per encrypt call. The master key never touches the database.
-- **Password hashing**: argon2id (OWASP-recommended, memory-hard)
-- **JWT**: HS256, 24h expiry, same token for REST API and MCP bearer auth
-- **HTML sanitization**: Email HTML bodies are sanitized with a strict allowlist — no `<script>`, `<iframe>`, `<img>`, or `javascript:` URIs
-- **Body truncation**: Email bodies capped at 50,000 characters
-- **Log redaction**: pino redacts `password`, `token`, `secret`, `auth_tag`, `encrypted_secret_blob` from all log output
-- **Rate limiting**: Redis sliding window — 60 req/min general, 10/min for `send_message`
+- list_folders
+- list_messages
+- search_messages
+- read_message
+- send_message
+- mark_read
+- mark_unread
+- archive_message
 
-## Running Tests
+If you see these, you're all set!
 
+---
+
+## Things You Can Ask Claude
+
+Once connected, just talk to Claude naturally:
+
+| What you want | What to say |
+|---|---|
+| See recent emails | *"Show me my last 10 emails"* |
+| Find specific emails | *"Search for emails from my boss about the project"* |
+| Read an email | *"Read the email from Amazon about my order"* |
+| Send an email | *"Send an email to john@example.com saying I'll be there at 3pm"* |
+| Mark as unread | *"Mark that email as unread"* |
+| Clean up inbox | *"Archive that email"* |
+| Check folders | *"What folders do I have in my Yahoo Mail?"* |
+
+---
+
+## What Claude Can Do With Your Email
+
+| Capability | What it does |
+|---|---|
+| **List folders** | Shows all your mailboxes (Inbox, Sent, Spam, Archive, etc.) |
+| **List messages** | Shows recent emails with sender and subject — up to 100 at a time |
+| **Search messages** | Finds emails by keyword, sender, subject, or date |
+| **Read a message** | Opens the full email content |
+| **Send a message** | Sends an email from your Yahoo account |
+| **Mark as read** | Marks an email as read |
+| **Mark as unread** | Marks an email as unread |
+| **Archive** | Moves an email to your Archive folder |
+
+> Note: Claude cannot delete emails — this is intentional for safety.
+
+---
+
+## Stopping and Starting Again
+
+**To stop the server:**
+Press `Ctrl+C` in the terminal window running `pnpm dev`.
+
+**Next time you want to use it:**
 ```bash
-pnpm test
+# Step 1: Make sure Docker is running (open Docker Desktop)
+# Step 2: Start the database again
+docker compose up -d postgres redis
+
+# Step 3: Start the server
+cd ymail-mcp-cloud
+pnpm dev
 ```
 
-Test coverage includes:
+You don't need to run `pnpm install` or `pnpm migrate` again after the first time.
 
-| Package | Tests |
-|---------|-------|
-| `shared-types` | Zod schema validation (ListMessages, SearchMessages, SendMessage, AppError) |
-| `security` | AES-256-GCM roundtrip, wrong key rejection, JWT sign/verify/expiry/tamper, redact recursion |
-| `mailbox-core` | HTML sanitizer (XSS payloads), body truncator |
-| `provider-yahoo` | IMAP search criteria builder, IMAP→AppError mapper |
+---
 
-## Known Limitations
+## Troubleshooting
 
-- **No delete in V1**: `delete_message` is intentionally omitted (see ADR 004)
-- **OAuth not implemented**: `YahooOAuthProvider` throws `NOT_IMPLEMENTED`; only app-password auth is supported
-- **Single connection per user**: One Yahoo account per user account
-- **SMTP port 465**: Some cloud providers block outbound SMTP. Check your hosting provider's egress policy before deploying.
-- **No attachment download**: Attachments are detected and flagged (`hasAttachments: true`) but not downloadable via MCP tools in V1
+**"Claude can't find the email tools / no hammer icon"**
+→ Did you fully quit and reopen Claude Desktop (not just close the window)?
+→ Check that the JSON in `claude_desktop_config.json` is valid — no missing commas or brackets
 
-## OAuth Migration Path
+**"Connection failed" when connecting Yahoo**
+→ Make sure you used an **App Password** from Yahoo's security settings, not your regular Yahoo login password
+→ App passwords look like `abcd efgh ijkl mnop` — 16 characters, usually shown in groups of 4
 
-When Yahoo OAuth support is needed:
+**"Unauthorized" error**
+→ Your login token has expired (tokens last 24 hours)
+→ Run the register or login command again to get a new token, then update `claude_desktop_config.json`
 
-1. Implement `YahooOAuthProvider` in `packages/provider-yahoo/src/yahoo-oauth-provider.ts`
-2. Add `oauth_token` + `refresh_token` fields to `mail_connections` table (new Drizzle migration)
-3. Add `/auth/yahoo/oauth` callback route in `apps/api`
-4. The MCP tool layer requires zero changes — it only depends on the `MailProvider` interface
-
-## Project Structure Notes
-
-- **No circular dependencies**: `shared-types` is the only universal leaf; all others depend on it
-- **Per-request McpServer**: Each `/mcp` request creates a fresh `McpServer` + `StreamableHTTPServerTransport` (stateless, fully isolated per user)
-- **IMAP concurrency safety**: `async-mutex` per user connection in the imapflow pool (imapflow is not concurrency-safe)
-- **ADRs**: See `docs/ADRs/` for architectural decision records
-
-## Docker Production Build
-
+To log in again (if you already registered):
 ```bash
-# Build and start all services
-docker compose up --build
-
-# Or build images individually
-docker build -f infra/docker/Dockerfile.api -t ymail-api .
-docker build -f infra/docker/Dockerfile.worker -t ymail-worker .
+curl -s -X POST http://localhost:3001/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"any@email.com","password":"your-password"}' | python3 -m json.tool
 ```
+
+**"Server not found" / Claude says it can't reach the server**
+→ Is the `pnpm dev` terminal still running? Check it — it may have stopped
+→ Start it again: `pnpm dev`
+
+**Docker errors**
+→ Open Docker Desktop first and wait for it to show a green status light
+→ Then run `docker compose up -d postgres redis` again
+
+---
+
+## GitHub Repository
+
+[https://github.com/saikiransalama/ymail-mcp-cloud](https://github.com/saikiransalama/ymail-mcp-cloud)
